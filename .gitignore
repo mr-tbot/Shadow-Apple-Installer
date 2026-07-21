@@ -1,0 +1,20 @@
+# Never commit firmware blobs, secrets, or local operator artifacts
+*.bin
+*.img
+*.pcap
+*.pcapng
+*.enc
+firmware/
+downloads/
+# local, personal, or generated config (users create their own from the .example)
+config/protect-ssids.conf
+config/*.local
+secrets*
+creds*
+.env
+# editor / OS
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

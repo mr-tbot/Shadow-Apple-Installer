@@ -1,0 +1,17 @@
+# ============================================================================
+# protect-ssids.conf  —  networks that must NEVER be deauthed
+# ============================================================================
+# Copy to protect-ssids.conf (setup.sh builds it for you interactively).
+# One SSID per line. Trailing '*' = prefix match. '#' starts a comment.
+#
+# BSSIDs are resolved automatically by wl-refresh (from the recon DB, the
+# capture log, and this router's own APs), so you only list SSID NAMES here.
+# The generated MAC lists feed both mdk3 (whitelist mode) and hcxdumptool
+# (--filtermode=1 protection list).
+#
+# Examples:
+#   MyHomeWiFi            # exact match
+#   MyHome*               # protects MyHome, MyHome-5G, MyHome-Guest, ...
+#   Office-Corp
+# ----------------------------------------------------------------------------
+# (add your own networks below — this example ships empty on purpose)

