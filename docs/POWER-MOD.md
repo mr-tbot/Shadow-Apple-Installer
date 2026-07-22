@@ -93,9 +93,6 @@ VBUS. Bridge across it so the port draws directly from the input rail.
 
 <img width="1718" height="1806" alt="20260722_113140" src="https://github.com/user-attachments/assets/07fedac2-60ad-476b-b55f-e50676e962a6" />
 
-
-*Photo goes here. Save it as `docs/images/power-mod-jumper.jpg`.*
-
 ### Safety — read before you cut
 
 - **You lose over-current protection on that port.** A shorted dongle now dumps
