@@ -91,7 +91,8 @@ VBUS. Bridge across it so the port draws directly from the input rail.
 
 **Reference photo** — the jumper in place on the AR300M board:
 
-![VBUS jumper mod on the AR300M board](images/power-mod-jumper.jpg)
+<img width="1718" height="1806" alt="20260722_113140" src="https://github.com/user-attachments/assets/07fedac2-60ad-476b-b55f-e50676e962a6" />
+
 
 *Photo goes here. Save it as `docs/images/power-mod-jumper.jpg`.*
 
