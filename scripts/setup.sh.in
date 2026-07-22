@@ -357,7 +357,7 @@ export LD_LIBRARY_PATH=/sd/usr/lib:/sd/lib:/usr/lib:/lib
 sd_ok(){ mount | grep -q ' /sd ' && touch /sd/.rwtest 2>/dev/null && rm -f /sd/.rwtest 2>/dev/null; }
 if ! sd_ok; then
   umount /sd 2>/dev/null
-  for d in /dev/sda1 /dev/sdb1; do
+  for d in /dev/sdcard/sd1 /dev/sda1 /dev/sdb1; do
     [ -b "\$d" ] || continue
     e2fsck -y "\$d" >/dev/null 2>&1
     e2fsck -y "\$d" >/dev/null 2>&1

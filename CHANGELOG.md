@@ -9,9 +9,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 ### Changed
 - `/sd` auto-recovery is now more robust: also catches an ext4 **read-only remount**
   (not just an unmounted `/sd`) via a mount+writable check, runs a **two-pass**
-  `e2fsck`, verifies the result is writable, and logs the outcome. Still does **not**
-  reboot — the `/sd`-dependent services start after the repair in the same boot, and
-  a reboot can't fix a filesystem fsck already failed to repair.
+  `e2fsck` against the **canonical device** (`/dev/sdcard/sd1`, what fstab mounts,
+  with `sda1`/`sdb1` fallbacks), verifies the result is writable, and logs the
+  outcome. Still does **not** reboot — the `/sd`-dependent services (pineapd, the
+  switch daemon, and the symlinked captive portal) all come up *after* the repair in
+  the same boot, and a reboot can't fix a filesystem fsck already failed to repair.
 
 ## [1.0.1] — 2026-07-22
 
