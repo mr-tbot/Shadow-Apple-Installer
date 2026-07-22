@@ -350,6 +350,16 @@ if [ -n "$BOOT_CMD" ]; then
   cat > /usr/bin/bot-autostart <<AUTO
 #!/bin/sh
 export LD_LIBRARY_PATH=/sd/usr/lib:/sd/lib:/usr/lib:/lib
+# /sd auto-recovery: a yanked-power / mid-write shutdown can corrupt the USB ext4
+# journal so it won't mount -> all automation is lost. If /sd isn't mounted, fsck
+# (-y auto-repair) and remount so the unit self-heals. (This file is on internal flash.)
+if ! mount | grep -q ' /sd '; then
+  for d in /dev/sda1 /dev/sdb1; do
+    [ -b "\$d" ] || continue
+    e2fsck -y "\$d" >/dev/null 2>&1
+    mkdir -p /sd; mount -t ext4 "\$d" /sd 2>/dev/null && break
+  done
+fi
 mkdir -p /tmp/handshakes /sd/handshakes
 # quarantine a malformed recon.db (unclean shutdown / ext4 journal loss) so pineapd can recreate it & start
 [ -f /sd/recon.db ] && ! /sd/usr/bin/python -c "import sqlite3,sys; sys.exit(0 if sqlite3.connect('/sd/recon.db').execute('pragma integrity_check').fetchone()[0]=='ok' else 1)" 2>/dev/null && mv /sd/recon.db "/sd/recon.db.malformed.\$(cut -d. -f1 /proc/uptime 2>/dev/null)" 2>/dev/null
