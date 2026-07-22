@@ -27,7 +27,9 @@ recon ↔ deauth+capture** workflow. It asks what you want, applies only that, a
 - **Intelligent radio allocation** — onboard = uplink + management AP (repeater),
   dual-band USB = monitor/capture (2.4 **and** 5 GHz), 2.4 USB = rogue AP.
 - **Hardware-switch modes** (AR300M): **Left = recon** (green LED),
-  **Right = deauth + handshake capture** (red LED), 6 s debounce.
+  **Right = deauth + handshake capture** (red LED), 6 s debounce. Boot is always
+  recon and deauth **never auto-arms** — a driver wedge can never bootloop; arm
+  deauth by moving the switch Left→Right.
 - **Whitelist your own networks** — protect SSIDs by name (prefix `Home*`
   supported); BSSIDs auto-resolve from scans + captures. In deauth mode the
   device hits everything **except** your list.

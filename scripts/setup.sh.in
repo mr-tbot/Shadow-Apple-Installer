@@ -382,6 +382,7 @@ echo; c_hr; c_b "DONE — $HOSTNAME is configured."
 echo "  Panel : http://172.16.42.1:1471/   (root / your password)"
 [ "$DO_MGMT" = y ] && echo "  Wireless admin: join '$MGMT_SSID'"
 [ "$MODE" = switch ] && echo "  Switch: LEFT = recon (green LED) · RIGHT = deauth+capture (red LED)"
-[ "$MODE" = switch ] && echo "  ⚠ On boot, if the switch is RIGHT it will start deauthing — keep it LEFT unless intended."
+[ "$MODE" = switch ] && echo "  Boot is ALWAYS recon (green) — deauth never auto-starts, so a wedge can't loop."
+[ "$MODE" = switch ] && echo "  To arm deauth: move the switch LEFT then RIGHT. Full power-cycle if the USB radio ever wedges."
 echo
 yesno "Reboot now to validate the full boot path?" "n" && { echo "Rebooting…"; sync; reboot; }

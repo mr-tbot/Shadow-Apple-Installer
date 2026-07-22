@@ -45,8 +45,13 @@ report. An **every-N-hours** cron (default 2, chosen at setup) re-runs `bot-repo
 - **switch** — reads the AR300M slide switch every 3 s (6 s debounce):
   - LEFT → `run_scan` recon loop (feeds the panel + recon.db), green LED.
   - RIGHT → one long-lived `hcxdumptool` with `--filterlist_ap=hcx-protect.list
-    --filtermode=1` (deauth/PMKID **all except** your whitelist, capture
-    handshakes, 2.4+5 GHz), red LED.
+    --filtermode=1 --disable_client_attacks` (deauth/PMKID **all except** your
+    whitelist, capture handshakes, 2.4+5 GHz), red LED.
+  - **Boot is always recon.** Deauth never auto-arms on boot — even if the switch
+    is physically RIGHT the unit comes up in recon (green), and briefly flashes
+    red/green as an "arm hint". To enter deauth, move the switch LEFT (recon) then
+    back RIGHT. This makes a deauth-induced driver wedge → watchdog reboot land
+    back in recon instead of looping. See *Boot safety & the RT5572 wedge* below.
 - **auto** — time-based alternation: N seconds recon, then M seconds passive
   capture, repeating. No deauth.
 - **recon** — discovery only.
@@ -59,6 +64,34 @@ start/stopped or the monitor vif is churned. The daemon therefore runs **one**
 long-lived capture per mode entry and only tears it down on a **clean** mode
 change (stop scan → pause hop → settle → hand off). To reload the whitelist,
 flip the switch (LEFT→RIGHT) — never hot-restart hcxdumptool on the live monitor.
+
+## Boot safety & the RT5572 wedge
+
+The same fragile driver can wedge when a monitor vif is created or active
+injection starts **while the radio is busy or the system hasn't settled** (cold
+boot). A wedge stops feeding the hardware watchdog → the unit reboots in ~30 s.
+If the switch were RIGHT and deauth auto-started every boot, that becomes a
+**bootloop** — and repeated hard reboots can corrupt the ext4 journal on the USB
+`/sd` (recover with `e2fsck -y /dev/sda1`). The switch daemon prevents this:
+
+1. **Deauth never auto-arms on boot.** `FORCE_RECON=1` at start; the unit comes
+   up in recon regardless of switch position. Deauth is enabled only after the
+   switch is seen at LEFT and then moved to RIGHT (an explicit "arm"). A wedge →
+   reboot therefore always returns to recon — a loop is impossible by design.
+2. **Boot-settle grace** (`SETTLE=90`): nothing fragile runs until the system has
+   been up ~90 s (skipped if already past it, e.g. a manual restart).
+3. **Failsafe flag** `/sd/bot/.deauth_pending`: written before hcx starts, removed
+   only after 75 s of stable capture. If it survives a reboot the wedge is logged.
+4. **Gentler capture**: `--disable_client_attacks` drops the per-client deauth
+   flood that overloads the RT5572 TX path (AP deauth + PMKID still get
+   handshakes), and `airmon-ng` bring-up is wrapped in `timeout` so it can never
+   hang the daemon; if no monitor iface results, it falls back to recon.
+
+> **On very fragile units** active deauth may still wedge intermittently — the
+> capture itself works (EAPOL M1/M2/M3 land in `hcx-status.log`), but the driver
+> can drop. A **full power-cycle** (not a soft reboot) resets the USB radio and
+> restores stability. If you only want handshakes without the wedge risk, use
+> **auto** mode (passive) or leave the switch LEFT (recon) — both are rock-stable.
 
 ## Protected-network whitelist
 
