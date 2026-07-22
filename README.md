@@ -52,6 +52,9 @@ Full details and supported chipsets: **[docs/HARDWARE.md](docs/HARDWARE.md)**.
 > a VBUS jumper, or dropping one radio fixes it. This is *the* thing that makes
 > active deauth stable.
 
+<img width="1718" height="1806" alt="20260722_113140" src="https://github.com/user-attachments/assets/e8361d0a-9b12-4f71-bab0-6c5409cee163" />
+
+
 ## 🚀 Quickstart
 
 **1. Flash** (on your computer — Git Bash / Linux / macOS; router on LAN):
