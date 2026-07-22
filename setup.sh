@@ -777,15 +777,20 @@ if [ -n "$BOOT_CMD" ]; then
   cat > /usr/bin/bot-autostart <<AUTO
 #!/bin/sh
 export LD_LIBRARY_PATH=/sd/usr/lib:/sd/lib:/usr/lib:/lib
-# /sd auto-recovery: a yanked-power / mid-write shutdown can corrupt the USB ext4
-# journal so it won't mount -> all automation is lost. If /sd isn't mounted, fsck
-# (-y auto-repair) and remount so the unit self-heals. (This file is on internal flash.)
-if ! mount | grep -q ' /sd '; then
+# /sd auto-recovery: a yanked-power / mid-write shutdown can corrupt the USB ext4 so
+# it won't mount -- or ext4 remounts it READ-ONLY on error -- and automation dies.
+# Self-heal on boot WITHOUT rebooting: the services below start after /sd is back, in
+# this same boot. No reboot is done -- if fsck can't repair it, a reboot only loops.
+sd_ok(){ mount | grep -q ' /sd ' && touch /sd/.rwtest 2>/dev/null && rm -f /sd/.rwtest 2>/dev/null; }
+if ! sd_ok; then
+  umount /sd 2>/dev/null
   for d in /dev/sda1 /dev/sdb1; do
     [ -b "\$d" ] || continue
     e2fsck -y "\$d" >/dev/null 2>&1
-    mkdir -p /sd; mount -t ext4 "\$d" /sd 2>/dev/null && break
+    e2fsck -y "\$d" >/dev/null 2>&1
+    mkdir -p /sd; mount -t ext4 "\$d" /sd 2>/dev/null && sd_ok && break
   done
+  sd_ok && logger -t bot "sd auto-recovery: /sd repaired and remounted" || logger -t bot "sd auto-recovery FAILED: /sd unrecoverable, running degraded"
 fi
 mkdir -p /tmp/handshakes /sd/handshakes
 # quarantine a malformed recon.db (unclean shutdown / ext4 journal loss) so pineapd can recreate it & start
