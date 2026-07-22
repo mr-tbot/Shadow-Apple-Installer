@@ -313,11 +313,17 @@ start_deauth(){
   touch "$PENDING"                       # failsafe: cleared only after 75s stable
   FILT=""; [ -s "$HCXFILTER" ] && FILT="--filterlist_ap=$HCXFILTER --filtermode=1"
   TS=$(date +%Y%m%d_%H%M%S)
-  echo "$(date) hcx attack on $MON (protect $([ -s "$HCXFILTER" ] && wc -l < "$HCXFILTER" || echo 0) BSSIDs, client-attacks off)" >> $LOG
-  # --disable_client_attacks: skip the per-client deauth flood that overloads the
-  # rt2800usb TX path; AP deauth + PMKID still capture handshakes, far more stable.
-  /sd/usr/sbin/hcxdumptool -i "$MON" -o "$OUT/attack_$TS.pcapng" -t 5 $FILT \
-      --disable_client_attacks --enable_status=3 >> "$OUT/hcx-status.log" 2>&1 &
+  # RT5572 SAFETY: active injection floods the rt2800usb TX path and wedges the
+  # driver -> watchdog reboot -> a wedged card even HANGS boot. Default is a fully
+  # PASSIVE dumper (--disable_client_attacks --disable_ap_attacks = no injection at
+  # all), which never wedges; it captures handshakes/PMKID opportunistically.
+  # Opt into active AP attacks (stronger, may wedge -> power-cycle to recover) with:
+  #     touch /sd/bot/deauth-active
+  ATK="--disable_client_attacks --disable_ap_attacks"; MODEWORD="PASSIVE capture"
+  [ -f /sd/bot/deauth-active ] && { ATK="--disable_client_attacks"; MODEWORD="ACTIVE deauth (AP)"; }
+  echo "$(date) hcx $MODEWORD on $MON (protect $([ -s "$HCXFILTER" ] && wc -l < "$HCXFILTER" || echo 0) BSSIDs)" >> $LOG
+  /sd/usr/sbin/hcxdumptool -i "$MON" -o "$OUT/capture_$TS.pcapng" $FILT \
+      $ATK --enable_status=3 >> "$OUT/hcx-status.log" 2>&1 &
   HP=$!; echo $HP > $PIDF
   # if hcx dies within 8s it rejected an option / the driver wedged: fall back.
   ( sleep 8; kill -0 "$HP" 2>/dev/null || { echo "$(date) hcx exited early -> recon" >> $LOG; led recon; }
@@ -781,6 +787,8 @@ if [ -n "$BOOT_CMD" ]; then
 #!/bin/sh
 export LD_LIBRARY_PATH=/sd/usr/lib:/sd/lib:/usr/lib:/lib
 mkdir -p /tmp/handshakes /sd/handshakes
+# quarantine a malformed recon.db (unclean shutdown / ext4 journal loss) so pineapd can recreate it & start
+[ -f /sd/recon.db ] && ! /sd/usr/bin/python -c "import sqlite3,sys; sys.exit(0 if sqlite3.connect('/sd/recon.db').execute('pragma integrity_check').fetchone()[0]=='ok' else 1)" 2>/dev/null && mv /sd/recon.db "/sd/recon.db.malformed.\$(cut -d. -f1 /proc/uptime 2>/dev/null)" 2>/dev/null
 n=0; while ! pgrep pineapd >/dev/null 2>&1 && [ \$n -lt 20 ]; do /etc/init.d/pineapd start >/dev/null 2>&1; sleep 3; n=\$((n+1)); done
 sleep 5
 pineap /tmp/pineap.conf logging on >/dev/null 2>&1; pineap /tmp/pineap.conf capture_ssids on >/dev/null 2>&1
