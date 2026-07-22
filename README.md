@@ -46,6 +46,12 @@ GL.iNet **GL-AR300M16-Ext** + a **dual-band (RT5572)** USB adapter + a
 **2.4 GHz (RT5370)** USB adapter + a USB flash drive on a **3-port hub**.
 Full details and supported chipsets: **[docs/HARDWARE.md](docs/HARDWARE.md)**.
 
+> ⚡ **Running two USB radios? Read [docs/POWER-MOD.md](docs/POWER-MOD.md) first.**
+> The AR300M's USB port can't supply enough current for two radios + flash under
+> transmit load — active deauth browns the card out and wedges it. A powered hub,
+> a VBUS jumper, or dropping one radio fixes it. This is *the* thing that makes
+> active deauth stable.
+
 ## 🚀 Quickstart
 
 **1. Flash** (on your computer — Git Bash / Linux / macOS; router on LAN):
@@ -98,7 +104,7 @@ lib/                     device scripts (readable source; embedded into setup.sh
 portal/index.php.template branded captive portal (with {{placeholders}})
 config/                  protect-ssids.conf.example
 scripts/build.sh         regenerate setup.sh from lib/ + portal/
-docs/                    ARCHITECTURE.md · HARDWARE.md · LEGAL.md
+docs/                    ARCHITECTURE.md · HARDWARE.md · POWER-MOD.md · LEGAL.md
 ```
 
 Architecture details: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.

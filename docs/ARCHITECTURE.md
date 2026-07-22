@@ -88,7 +88,8 @@ hard reboots corrupt the ext4 journal on `/sd` (recover: `e2fsck -y /dev/sda1`).
   contention) — see the two-radio note below.
 
 With adequate power, full active deauth (client+AP) runs indefinitely with **zero**
-USB resets. On a power-starved unit, use the passive default (below) instead.
+USB resets. On a power-starved unit, use the passive default (below) instead. Full
+write-up, the jumper mod, and how to verify: **[POWER-MOD.md](POWER-MOD.md)**.
 
 ### The daemon's software guards (belt-and-suspenders)
 
