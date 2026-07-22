@@ -50,11 +50,11 @@ report. An **every-N-hours** cron (default 2, chosen at setup) re-runs `bot-repo
     no injection) so it can never wedge the radio. Opt into **active** AP-deauth
     (`--disable_client_attacks` only — stronger, but may wedge a fragile card) with
     `touch /sd/bot/deauth-active`.
-  - **Boot is always recon.** Deauth never auto-arms on boot — even if the switch
-    is physically RIGHT the unit comes up in recon (green), and briefly flashes
-    red/green as an "arm hint". To enter deauth, move the switch LEFT (recon) then
-    back RIGHT. This makes a deauth-induced driver wedge → watchdog reboot land
-    back in recon instead of looping. See *Boot safety & the RT5572 wedge* below.
+  - **Boot follows the switch** (RIGHT = deauth after the ~90 s settle grace). The
+    only exception: if a previous deauth **wedged** the radio, the unit holds recon
+    until you cycle the switch LEFT→RIGHT — so a wedge self-heals instead of
+    bootlooping. See *Boot safety & the RT5572 wedge* below, and note active deauth
+    needs adequate USB power.
 - **auto** — time-based alternation: N seconds recon, then M seconds passive
   capture, repeating. No deauth.
 - **recon** — discovery only.
@@ -70,42 +70,52 @@ flip the switch (LEFT→RIGHT) — never hot-restart hcxdumptool on the live mon
 
 ## Boot safety & the RT5572 wedge
 
-The same fragile driver can wedge when a monitor vif is created or active
-injection starts **while the radio is busy or the system hasn't settled** (cold
-boot). A wedge stops feeding the hardware watchdog → the unit reboots in ~30 s.
-If the switch were RIGHT and deauth auto-started every boot, that becomes a
-**bootloop** — and repeated hard reboots can corrupt the ext4 journal on the USB
-`/sd` (recover with `e2fsck -y /dev/sda1`). The switch daemon prevents this:
+### The real root cause: USB power
 
-1. **Deauth never auto-arms on boot.** `FORCE_RECON=1` at start; the unit comes
-   up in recon regardless of switch position. Deauth is enabled only after the
-   switch is seen at LEFT and then moved to RIGHT (an explicit "arm"). A wedge →
-   reboot therefore always returns to recon — a loop is impossible by design.
+The single biggest source of "the radio wedges under deauth" on this class of unit
+is **USB power starvation**, not the driver. Two USB Wi-Fi cards (≈450 mA each) plus
+a USB flash drive (≈200 mA) pull ~1.1 A through the AR300M's USB-A port, which is
+current-limited to ~500 mA. The instant a radio **transmits** (deauth is the worst
+case) the VBUS sags, the card browns out and **resets** (`usb ... reset ... device`
+in dmesg), `rt2800usb` wedges, the watchdog fires, and it reboots — and repeated
+hard reboots corrupt the ext4 journal on `/sd` (recover: `e2fsck -y /dev/sda1`).
+
+**Give the radios real current and active deauth becomes stable.** Any of:
+- a **powered USB hub** (its own adapter), or
+- **bypass the port's current limiter** — jumper 5 V from the input rail to the
+  USB-A/hub VBUS, fed by a 5 V/2–3 A supply (you lose over-current protection), or
+- **run one USB radio** instead of two (halves the load, kills the dual-radio TX
+  contention) — see the two-radio note below.
+
+With adequate power, full active deauth (client+AP) runs indefinitely with **zero**
+USB resets. On a power-starved unit, use the passive default (below) instead.
+
+### The daemon's software guards (belt-and-suspenders)
+
+1. **Boot follows the switch; a wedge can't loop.** The unit boots into whatever the
+   switch selects (RIGHT = deauth after the settle grace). But a deauth that wedges
+   leaves `/sd/bot/.deauth_pending`; if that flag survives a reboot the daemon
+   **forces recon until the switch is cycled LEFT→RIGHT** — so a wedge self-heals to
+   recon instead of bootlooping.
 2. **Boot-settle grace** (`SETTLE=90`): nothing fragile runs until the system has
    been up ~90 s (skipped if already past it, e.g. a manual restart).
-3. **Failsafe flag** `/sd/bot/.deauth_pending`: written before hcx starts, removed
-   only after 75 s of stable capture. If it survives a reboot the wedge is logged.
-4. **Passive capture by default**: deauth mode runs hcxdumptool as a passive
-   dumper (`--disable_client_attacks --disable_ap_attacks`, no injection), which
-   **cannot wedge the radio**. Active AP-deauth is opt-in (`touch
-   /sd/bot/deauth-active`). `airmon-ng` bring-up is `timeout`-wrapped so it can
-   never hang the daemon; if no monitor iface results, it falls back to recon.
-5. **recon.db integrity guard** (in `bot-autostart`): a malformed sqlite `recon.db`
-   (from an unclean shutdown) makes pineapd refuse to start — "Could not create
-   aps table" — so **nothing** runs. The guard runs `pragma integrity_check` and
+3. **Passive capture by default**: unless `/sd/bot/deauth-active` exists, deauth mode
+   runs hcxdumptool as a passive dumper (`--disable_client_attacks
+   --disable_ap_attacks`, no injection) which **cannot wedge the radio**. `touch
+   /sd/bot/deauth-active` to enable full active deauth (only do this once the radios
+   have adequate power). `airmon-ng` bring-up is `timeout`-wrapped; if no monitor
+   iface results it falls back to recon.
+4. **recon.db integrity guard** (in `bot-autostart`): a malformed sqlite `recon.db`
+   (from an unclean shutdown) makes pineapd refuse to start — "Could not create aps
+   table" — so **nothing** runs. The guard runs `pragma integrity_check` and
    quarantines a corrupt DB to `recon.db.malformed.*` so pineapd recreates a fresh
    one and boots normally. The whitelist file survives independently.
 
-> **The worst case we actually hit:** repeated *active-deauth* wedges degraded the
-> RT5572 into a state where it hung the driver **at boot probe** — before
-> networking — so the unit bootlooped with no SSH window and re-corrupted `/sd`.
-> A warm power-cycle did **not** clear it. The fix that did: **physically unplug
-> the USB Wi-Fi card and re-plug it** (a cold USB re-enumeration resets the radio;
-> a soft reboot does not). That is why deauth now defaults to passive — so the
-> radio is never driven into that state in the first place. If you only want
-> handshakes with zero risk, use **auto** (passive) or leave the switch LEFT
-> (recon) — both are rock-stable; active deauth on this class of USB radio is the
-> one fragile path.
+> **If a radio ever wedges hard** (bootloops with no SSH window), a warm power-cycle
+> may not clear it — **physically re-seat the USB card** (cold re-enumeration resets
+> the radio; a soft reboot does not). Then fix the underlying power. If you only want
+> handshakes with zero risk, use the passive default or leave the switch LEFT (recon)
+> — both are rock-stable regardless of power.
 
 ## Protected-network whitelist
 

