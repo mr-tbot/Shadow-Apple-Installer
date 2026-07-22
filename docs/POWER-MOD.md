@@ -89,7 +89,7 @@ VBUS. Bridge across it so the port draws directly from the input rail.
 - **Wire:** 26 AWG or heavier carries 1.5 A over that short run with margin. Keep the
   solder joints clean and mechanically secure.
 
-**Reference photo** — the jumper in place on the AR300M16-EXT SHAWOW board:
+**Reference photo** — the jumper in place on the AR300M-16EXT SHADOW board:
 
 <img width="1718" height="1806" alt="20260722_113140" src="https://github.com/user-attachments/assets/07fedac2-60ad-476b-b55f-e50676e962a6" />
 
